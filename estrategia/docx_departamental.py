@@ -180,7 +180,14 @@ INSTRUCCIONES:
 4. NO uses encabezados ni listas. NO inventes municipios fuera de los listados. Escribí en español Colombia, prosa directa.""".strip()
 
 
-def invoke_va_routing(prompt: str, va_root: Path, timeout_s: int = 90) -> str | None:
+def invoke_va_routing(prompt: str, va_root: Path, timeout_s: int = 90,
+                       forzar_cloud: bool = True) -> str | None:
+    """Invoca VA routing_inteligente vía subprocess.
+
+    forzar_cloud=True (default) salta Ollama local (muy lento en esta máquina ~2.5min/call)
+    y usa la cadena cloud-free: Cerebras qwen-3-235b (4-8s) → Groq → Mistral → Gemini.
+    NUNCA cae a Claude (no está en la cadena 'razonamiento' del routing).
+    """
     prompt_dir = PROJECT_ROOT / "data" / "raw" / "_prompts"
     prompt_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ_%f")
@@ -189,9 +196,12 @@ def invoke_va_routing(prompt: str, va_root: Path, timeout_s: int = 90) -> str | 
     cmd = [
         sys.executable, "-m", "templates.routing_inteligente",
         "--tipo", "razonamiento",
+        "--modelo", "gemini-2.5-flash",
         "--prompt-file", pf.as_posix(),
         "--max-tokens", "350",
     ]
+    if forzar_cloud:
+        cmd.append("--forzar-cloud")
     try:
         proc = subprocess.run(
             cmd, cwd=va_root.as_posix(), capture_output=True,
@@ -221,6 +231,59 @@ def fallback_recomendacion(d: dict) -> str:
 
 
 USE_LLM = True  # toggleado por --no-llm desde main()
+
+
+def precompute_recomendaciones(deptos: list[dict], con, max_workers: int = 4) -> dict[str, dict]:
+    """Genera las 34 recomendaciones EN PARALELO via VA cloud chain.
+
+    Returns: dict { departamento_nombre: {"text": str, "elapsed_s": float, "source": "llm"|"fallback"} }
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Prepara los prompts (1 SQL hit por depto para top mpios)
+    prompts: dict[str, tuple[str, dict]] = {}
+    for d in deptos:
+        top_op = get_top_mpios_depto(
+            con, d["nombre"], "cuadrante IN ('Q2_MOVILIZAR','Q3_CONVERTIR')", limit=10
+        )
+        top_def = get_top_mpios_depto(
+            con, d["nombre"], "cuadrante LIKE 'Q1%'", limit=10
+        )
+        prompts[d["nombre"]] = (build_prompt_recomendacion(d, top_op, top_def), d)
+
+    results: dict[str, dict] = {}
+
+    def _worker(depto_nombre: str) -> tuple[str, dict]:
+        prompt, _d = prompts[depto_nombre]
+        t0 = time.monotonic()
+        out = invoke_va_routing(prompt, VA_ROOT, timeout_s=60, forzar_cloud=True)
+        elapsed = time.monotonic() - t0
+        if out and len(out) > 80:
+            out = out.replace("```", "").strip()
+            return depto_nombre, {"text": out, "elapsed_s": elapsed, "source": "llm"}
+        return depto_nombre, {
+            "text": fallback_recomendacion(prompts[depto_nombre][1]),
+            "elapsed_s": elapsed, "source": "fallback",
+        }
+
+    print(f"  [parallel-LLM] lanzando {len(prompts)} llamadas con {max_workers} workers (VA cloud chain · sin Claude)...")
+    t_start = time.monotonic()
+    with ThreadPoolExecutor(max_workers=max_workers) as exe:
+        futures = {exe.submit(_worker, name): name for name in prompts}
+        done = 0
+        n_llm = 0
+        for fut in as_completed(futures):
+            name, res = fut.result()
+            results[name] = res
+            done += 1
+            if res["source"] == "llm":
+                n_llm += 1
+            sys.stdout.write(f"\r  [parallel-LLM] {done}/{len(prompts)} · LLM={n_llm} fallback={done-n_llm} · {res['elapsed_s']:.1f}s {name[:25]:25s}")
+            sys.stdout.flush()
+    sys.stdout.write("\n")
+    total = time.monotonic() - t_start
+    print(f"  [parallel-LLM] terminado en {total:.1f}s · LLM={n_llm}/{len(prompts)} ({n_llm*100//len(prompts)}%)")
+    return results
 
 
 def build_doc(con) -> Document:
@@ -300,9 +363,14 @@ def build_doc(con) -> Document:
 
     # Capítulos por departamento
     _h(doc, "Capítulos por departamento", level=1, color=VERDE_PACTO)
+
+    # Precomputa las 34 recomendaciones EN PARALELO si USE_LLM activo
+    recomendaciones: dict[str, dict] = {}
+    if USE_LLM:
+        recomendaciones = precompute_recomendaciones(deptos, con, max_workers=4)
+
     for i, d in enumerate(deptos, 1):
-        # Estado en consola
-        sys.stdout.write(f"\r  [{i:>2}/{len(deptos)}] {d['nombre']:25s} (generando recomendación LLM...)  ")
+        sys.stdout.write(f"\r  [{i:>2}/{len(deptos)}] escribiendo {d['nombre']:25s}")
         sys.stdout.flush()
 
         doc.add_page_break()
@@ -358,21 +426,17 @@ def build_doc(con) -> Document:
 
         # Recomendación táctica
         _p(doc, "")
-        modo_label = "[VA-ROUTE Ollama qwen2.5:14b LOCAL]" if USE_LLM else "[determinista]"
+        modo_label = "[VA-ROUTE cadena cloud-free · sin Claude]" if USE_LLM else "[determinista]"
         _p(doc, f"Recomendación táctica · {modo_label}", bold=True, size=12, color=VERDE_PACTO)
         if USE_LLM:
-            prompt = build_prompt_recomendacion(d, top_op, top_def)
-            t0 = time.monotonic()
-            rec = invoke_va_routing(prompt, VA_ROOT, timeout_s=90)
-            elapsed = time.monotonic() - t0
-            if rec and len(rec) > 80:
-                rec = rec.replace("```", "").strip()
-                _p(doc, rec)
-                _p(doc, f"_(LLM local · {elapsed:.1f}s)_", size=8, color=GRIS,
-                   align=WD_ALIGN_PARAGRAPH.RIGHT)
+            r = recomendaciones.get(d["nombre"])
+            if r and r["source"] == "llm":
+                _p(doc, r["text"])
+                _p(doc, f"_(LLM cloud-free vía VA · {r['elapsed_s']:.1f}s)_",
+                   size=8, color=GRIS, align=WD_ALIGN_PARAGRAPH.RIGHT)
             else:
-                _p(doc, fallback_recomendacion(d))
-                _p(doc, "_(fallback determinista · LLM no respondió)_",
+                _p(doc, r["text"] if r else fallback_recomendacion(d))
+                _p(doc, "_(fallback determinista · proveedores cloud-free no respondieron)_",
                    size=8, color=GRIS, align=WD_ALIGN_PARAGRAPH.RIGHT)
         else:
             _p(doc, fallback_recomendacion(d))
