@@ -153,8 +153,8 @@ def render_index(stats: dict, docx_exists: bool) -> str:
 <header class="hero">
   <div class="container">
     <nav style="display:flex; gap:10px; margin-bottom:24px; flex-wrap:wrap">
-      <a href="./" style="display:inline-block; padding:10px 18px; background:rgba(255,255,255,0.20); color:#fff; border:1px solid rgba(255,255,255,0.45); border-radius:999px; text-decoration:none; font-size:13px; letter-spacing:0.10em; text-transform:uppercase; font-weight:700">Dashboard</a>
-      <a href="presentacion.html" style="display:inline-block; padding:10px 18px; background:transparent; color:#ffffff; border:1px solid rgba(255,255,255,0.55); border-radius:999px; text-decoration:none; font-size:13px; letter-spacing:0.10em; text-transform:uppercase; font-weight:600">Presentación / Explicación →</a>
+      <a href="./" style="display:inline-block; padding:10px 18px; background:#0a6e3a; color:#ffffff; border:1px solid #0a6e3a; border-radius:999px; text-decoration:none; font-size:13px; letter-spacing:0.10em; text-transform:uppercase; font-weight:700">Dashboard</a>
+      <a href="presentacion.html" style="display:inline-block; padding:10px 18px; background:#ffd700; color:#1a1a1a; border:1px solid #ffd700; border-radius:999px; text-decoration:none; font-size:13px; letter-spacing:0.10em; text-transform:uppercase; font-weight:700">📖 Cómo leer los datos →</a>
     </nav>
     <div class="meta">Iván Cepeda · Pacto Histórico · 2da vuelta presidencial 2026</div>
     <h1>¿Dónde están los 3 millones de votos<br>para ganar la segunda vuelta?</h1>
