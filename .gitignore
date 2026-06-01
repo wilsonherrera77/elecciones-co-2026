@@ -1,0 +1,44 @@
+# Virtualenvs
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Secrets · estos NUNCA en el repo
+.env
+*.env
+.api_keys.env
+*.pem
+*.key
+
+# Logs (telemetría local · no necesaria al público)
+logs/
+*.log
+
+# Prompts efímeros enviados a LLM local (cientos de archivitos)
+data/raw/_prompts/
+
+# Decisión usuario 2026-05-31: subir data raw + duckdb (repo auto-contenido ~30 MB).
+# Si quisieras hacerlo más liviano, descomenta:
+# data/raw/*.json.gz
+# data/processed/votos.duckdb
+
+# Archivos temporales del SO
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Builds
+build/
+dist/
+*.egg-info/
+
+# Plotly tmp
+.plotly/

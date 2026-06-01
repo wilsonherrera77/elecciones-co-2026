@@ -1,0 +1,14 @@
+# Puertos reservados por el proyecto elecciones
+# Antes de asignar uno nuevo: chequear que no choca con otros proyectos
+# (ver C:\Users\wilso\.claude\CLAUDE.md tabla de puertos)
+
+reservados:
+  - puerto: 8520
+    proceso: dashboard_streamlit_opcional
+    notas: solo si llegamos a hacer el dashboard interactivo
+
+# Puertos que NO debemos tocar (otros proyectos):
+# 3000 (ConvocaIA web), 3001 (VA), 3010 (NEURA Grafana),
+# 5432 (sys), 5433 (VA pg), 5434 (Convoca pg), 5441 (NEURA pg),
+# 6383 (NEURA redis), 8000-8001 (Convoca api), 8002 (NEURA chroma),
+# 8088-8089 (Orbit), 8501 (NEURA sim), 11434 (Ollama VA), 11435 (Ollama NEURA)
