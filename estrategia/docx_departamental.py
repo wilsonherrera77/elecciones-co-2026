@@ -220,6 +220,9 @@ def fallback_recomendacion(d: dict) -> str:
     return f"{diag}. Potencial movilizable: {d['no_votantes']:,} no-votantes. {accion}"
 
 
+USE_LLM = True  # toggleado por --no-llm desde main()
+
+
 def build_doc(con) -> Document:
     doc = Document()
     # Estilos default
@@ -353,24 +356,26 @@ def build_doc(con) -> Document:
         else:
             _p(doc, "(Cepeda no ganó en ningún municipio de este departamento)", color=GRIS)
 
-        # Recomendación táctica · Ollama LOCAL vía VA
+        # Recomendación táctica
         _p(doc, "")
-        _p(doc, "Recomendación táctica · [VA-ROUTE Ollama qwen2.5:14b LOCAL]", bold=True, size=12,
-           color=VERDE_PACTO)
-        prompt = build_prompt_recomendacion(d, top_op, top_def)
-        t0 = time.monotonic()
-        rec = invoke_va_routing(prompt, VA_ROOT, timeout_s=90)
-        elapsed = time.monotonic() - t0
-        if rec and len(rec) > 80:
-            # Limpia eventuales bloques de código que el modelo añada
-            rec = rec.replace("```", "").strip()
-            _p(doc, rec)
-            _p(doc, f"_(LLM local · {elapsed:.1f}s)_", size=8, color=GRIS, align=WD_ALIGN_PARAGRAPH.RIGHT)
+        modo_label = "[VA-ROUTE Ollama qwen2.5:14b LOCAL]" if USE_LLM else "[determinista]"
+        _p(doc, f"Recomendación táctica · {modo_label}", bold=True, size=12, color=VERDE_PACTO)
+        if USE_LLM:
+            prompt = build_prompt_recomendacion(d, top_op, top_def)
+            t0 = time.monotonic()
+            rec = invoke_va_routing(prompt, VA_ROOT, timeout_s=90)
+            elapsed = time.monotonic() - t0
+            if rec and len(rec) > 80:
+                rec = rec.replace("```", "").strip()
+                _p(doc, rec)
+                _p(doc, f"_(LLM local · {elapsed:.1f}s)_", size=8, color=GRIS,
+                   align=WD_ALIGN_PARAGRAPH.RIGHT)
+            else:
+                _p(doc, fallback_recomendacion(d))
+                _p(doc, "_(fallback determinista · LLM no respondió)_",
+                   size=8, color=GRIS, align=WD_ALIGN_PARAGRAPH.RIGHT)
         else:
-            rec_fb = fallback_recomendacion(d)
-            _p(doc, rec_fb)
-            _p(doc, "_(fallback determinista · LLM no disponible o respuesta vacía)_",
-               size=8, color=GRIS, align=WD_ALIGN_PARAGRAPH.RIGHT)
+            _p(doc, fallback_recomendacion(d))
 
     sys.stdout.write("\n")
 
@@ -416,13 +421,21 @@ def build_doc(con) -> Document:
 
 
 def main() -> int:
+    global USE_LLM
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-llm", action="store_true",
+                    help="usa fallback determinista para las 34 recomendaciones (rápido)")
+    args = ap.parse_args()
+    USE_LLM = not args.no_llm
+
     if not DB.exists():
         print(f"ERROR: falta {DB}. Corre el pipeline scraper primero.")
         return 1
     OUT.parent.mkdir(parents=True, exist_ok=True)
     print(f"[docx_departamental] generando {OUT.relative_to(PROJECT_ROOT)}")
     print(f"  VA_ROOT: {VA_ROOT}")
-    print(f"  modelo: Ollama qwen2.5:14b (vía templates.routing_inteligente)")
+    print(f"  modo: {'Ollama qwen2.5:14b (LLM)' if USE_LLM else 'fallback determinista (rápido)'}")
     con = duckdb.connect(DB.as_posix(), read_only=False)
     # Verifica cuadrantes_2v
     has = con.execute(
