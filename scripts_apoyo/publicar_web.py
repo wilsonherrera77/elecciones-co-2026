@@ -233,6 +233,7 @@ def render_index(stats: dict, docx_exists: bool) -> str:
       {docx_link}
       <a class="download-card" href="descargas/segunda_vuelta_3M.md" download><span class="icon">📋</span><div><div class="title">Reporte ejecutivo</div><div class="desc">Análisis 2da vuelta + cuadrantes + simulación 3M</div></div></a>
       <a class="download-card" href="descargas/como_leer_los_mapas.md" download><span class="icon">📖</span><div><div class="title">Cómo leer los mapas</div><div class="desc">Guía de interpretación + fórmulas del score 2da vuelta</div></div></a>
+      <a class="download-card" href="presentacion.html" style="background:#0a6e3a; color:white; border-color:#0a6e3a"><span class="icon">▶️</span><div><div class="title" style="color:white">Presentación de campaña</div><div class="desc" style="color:rgba(255,255,255,0.85)">12 slides · navegación por teclado · mapas embebidos</div></div></a>
       <a class="download-card" href="descargas/cuadrante_q2_movilizar.csv" download><span class="icon">🎯</span><div><div class="title">CSV Q2 movilizar</div><div class="desc">81 mpios decisivos · margen ≤10pp</div></div></a>
       <a class="download-card" href="descargas/cuadrante_q3_convertir.csv" download><span class="icon">🔄</span><div><div class="title">CSV Q3 convertir</div><div class="desc">240 mpios · persuasión centro</div></div></a>
       <a class="download-card" href="descargas/cuadrante_q1_defender.csv" download><span class="icon">🛡️</span><div><div class="title">CSV Q1 defender</div><div class="desc">425 mpios · proteger turnout</div></div></a>
