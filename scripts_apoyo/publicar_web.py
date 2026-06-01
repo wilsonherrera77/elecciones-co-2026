@@ -152,7 +152,10 @@ def render_index(stats: dict, docx_exists: bool) -> str:
 
 <header class="hero">
   <div class="container">
-    <div style="text-align:left; margin-bottom:24px"><a href="./" style="color:rgba(255,255,255,0.9); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase">← Volver a la presentación</a></div>
+    <nav style="display:flex; gap:10px; margin-bottom:24px; flex-wrap:wrap">
+      <a href="./" style="display:inline-block; padding:10px 18px; background:rgba(255,255,255,0.20); color:#fff; border:1px solid rgba(255,255,255,0.45); border-radius:999px; text-decoration:none; font-size:13px; letter-spacing:0.10em; text-transform:uppercase; font-weight:700">Dashboard</a>
+      <a href="presentacion.html" style="display:inline-block; padding:10px 18px; background:transparent; color:#ffffff; border:1px solid rgba(255,255,255,0.55); border-radius:999px; text-decoration:none; font-size:13px; letter-spacing:0.10em; text-transform:uppercase; font-weight:600">Presentación / Explicación →</a>
+    </nav>
     <div class="meta">Iván Cepeda · Pacto Histórico · 2da vuelta presidencial 2026</div>
     <h1>¿Dónde están los 3 millones de votos<br>para ganar la segunda vuelta?</h1>
     <p class="subtitle">Análisis municipio a municipio (1.189 municipios · 41.4M electores) basado en los datos oficiales de la Registraduría Nacional. Escrutinio al {stats['pct_escrutinio']:.2f}% · captura completa.</p>
@@ -280,9 +283,9 @@ def main() -> int:
     print(f"[publicar] assets copiados · csvs={info['n_csvs']} · docx={info['docx']}")
     stats = get_stats()
     html = render_index(stats, info["docx"])
-    (DOCS / "dashboard.html").write_text(html, encoding="utf-8")
-    print(f"[publicar] docs/dashboard.html generado · {len(html)/1024:.1f} KB")
-    print(f"[publicar] (la landing principal '/' es la presentación · docs/index.html)")
+    (DOCS / "index.html").write_text(html, encoding="utf-8")
+    print(f"[publicar] docs/index.html generado · {len(html)/1024:.1f} KB")
+    print("[publicar] (landing principal '/' es el dashboard · presentación accesible vía tab → docs/presentacion.html)")
     return 0
 
 
