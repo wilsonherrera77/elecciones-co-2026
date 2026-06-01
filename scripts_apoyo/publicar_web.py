@@ -154,7 +154,7 @@ def render_index(stats: dict, docx_exists: bool) -> str:
   <div class="container">
     <div class="meta">Iván Cepeda · Pacto Histórico · 2da vuelta presidencial 2026</div>
     <h1>¿Dónde están los 3 millones de votos<br>para ganar la segunda vuelta?</h1>
-    <p class="subtitle">Análisis municipio a municipio (1.189 municipios · 41.4M electores) basado en los datos oficiales de la Registraduría Nacional. Escrutinio al {stats['pct_escrutinio']:.2f}% · captura completa · cero API cloud paga.</p>
+    <p class="subtitle">Análisis municipio a municipio (1.189 municipios · 41.4M electores) basado en los datos oficiales de la Registraduría Nacional. Escrutinio al {stats['pct_escrutinio']:.2f}% · captura completa.</p>
     <div class="stats">
       <div class="stat-card"><div class="label">Cepeda · Pacto Histórico</div><div class="value">{fmt(stats['cepeda'])}</div><div class="delta">{stats['pct_cep']:.2f}% de votos válidos</div></div>
       <div class="stat-card"><div class="label">Espriella · Defensores</div><div class="value">{fmt(stats['espriella'])}</div><div class="delta">{stats['pct_esp']:.2f}% · pasa primero a runoff</div></div>
@@ -232,6 +232,7 @@ def render_index(stats: dict, docx_exists: bool) -> str:
     <div class="downloads">
       {docx_link}
       <a class="download-card" href="descargas/segunda_vuelta_3M.md" download><span class="icon">📋</span><div><div class="title">Reporte ejecutivo</div><div class="desc">Análisis 2da vuelta + cuadrantes + simulación 3M</div></div></a>
+      <a class="download-card" href="descargas/como_leer_los_mapas.md" download><span class="icon">📖</span><div><div class="title">Cómo leer los mapas</div><div class="desc">Guía de interpretación + fórmulas del score 2da vuelta</div></div></a>
       <a class="download-card" href="descargas/cuadrante_q2_movilizar.csv" download><span class="icon">🎯</span><div><div class="title">CSV Q2 movilizar</div><div class="desc">81 mpios decisivos · margen ≤10pp</div></div></a>
       <a class="download-card" href="descargas/cuadrante_q3_convertir.csv" download><span class="icon">🔄</span><div><div class="title">CSV Q3 convertir</div><div class="desc">240 mpios · persuasión centro</div></div></a>
       <a class="download-card" href="descargas/cuadrante_q1_defender.csv" download><span class="icon">🛡️</span><div><div class="title">CSV Q1 defender</div><div class="desc">425 mpios · proteger turnout</div></div></a>
@@ -244,8 +245,8 @@ def render_index(stats: dict, docx_exists: bool) -> str:
 
 <footer>
   <div class="container">
-    <p>Construido con <a href="https://github.com/wilsonherrera77">Visual_Agentes</a> (LOCAL-FIRST · cero API cloud paga). Patrón de scraping documentado como lección reusable en el framework.</p>
-    <p style="margin-top:8px">Fuente: <a href="https://resultados.registraduria.gov.co/">Registraduría Nacional del Estado Civil</a> · escrutinio al {stats['pct_escrutinio']:.2f}% · captura {now} · MIT License</p>
+    <p>Fuente: <a href="https://resultados.registraduria.gov.co/">Registraduría Nacional del Estado Civil</a> · escrutinio al {stats['pct_escrutinio']:.2f}% · captura {now} · MIT License</p>
+    <p style="margin-top:8px">Wilson Herrera Quiroga · 2026</p>
   </div>
 </footer>
 

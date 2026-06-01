@@ -5,7 +5,7 @@ Estructura:
 - Resumen ejecutivo
 - Tabla nacional 34 deptos
 - Capítulo por depto (34): cifras, cuadrantes locales, top 10 oportunidad, top 10 defensa,
-  + recomendación táctica generada por Ollama qwen2.5:14b LOCAL vía templates.routing_inteligente
+  + recomendación táctica narrativa por departamento
 - Anexo metodológico
 
 Output: data/outputs/analisis_departamental_3M_cepeda.docx
@@ -31,7 +31,7 @@ from docx.shared import Cm, Pt, RGBColor
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB = PROJECT_ROOT / "data" / "processed" / "votos.duckdb"
 OUT = PROJECT_ROOT / "data" / "outputs" / "analisis_departamental_3M_cepeda.docx"
-VA_ROOT = Path(os.environ.get("VA_ROOT", r"C:\Users\wilso\Desktop\Escritorio2026\Visual_Agentes"))
+NARRATIVE_ENGINE_ROOT = Path(os.environ.get("NARRATIVE_ENGINE_ROOT", ""))
 
 VERDE_PACTO = RGBColor(0x0A, 0x6E, 0x3A)
 ROJO_ESPRIELLA = RGBColor(0xC4, 0x3D, 0x2E)
@@ -146,7 +146,7 @@ def get_top_mpios_depto(con, depto_nombre: str, cuadrante_filter: str, limit: in
 
 
 def build_prompt_recomendacion(d: dict, top_op: list, top_def: list) -> str:
-    """Prompt corto para Ollama qwen2.5:14b."""
+    """Prompt corto para el motor de narrativa."""
     pct_cep = (d["votos_cepeda"] / d["validos"] * 100) if d["validos"] else 0
     pct_esp = (d["votos_espriella"] / d["validos"] * 100) if d["validos"] else 0
     op_str = "\n".join(
@@ -180,31 +180,27 @@ INSTRUCCIONES:
 4. NO uses encabezados ni listas. NO inventes municipios fuera de los listados. Escribí en español Colombia, prosa directa.""".strip()
 
 
-def invoke_va_routing(prompt: str, va_root: Path, timeout_s: int = 90,
-                       forzar_cloud: bool = True) -> str | None:
-    """Invoca VA routing_inteligente vía subprocess.
+def invoke_narrative_engine(prompt: str, engine_root: Path, timeout_s: int = 90) -> str | None:
+    """Invoca el motor de narrativa configurado vía NARRATIVE_ENGINE_ROOT.
 
-    forzar_cloud=True (default) salta Ollama local (muy lento en esta máquina ~2.5min/call)
-    y usa la cadena cloud-free: Cerebras qwen-3-235b (4-8s) → Groq → Mistral → Gemini.
-    NUNCA cae a Claude (no está en la cadena 'razonamiento' del routing).
+    Si no hay engine configurado o falla, el script cae a la generación
+    determinística basada en SQL (fallback_recomendacion).
     """
+    if not engine_root or not engine_root.exists():
+        return None
     prompt_dir = PROJECT_ROOT / "data" / "raw" / "_prompts"
     prompt_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ_%f")
     pf = prompt_dir / f"depto_{ts}.txt"
     pf.write_text(prompt, encoding="utf-8")
-    cmd = [
-        sys.executable, "-m", "templates.routing_inteligente",
-        "--tipo", "razonamiento",
-        "--modelo", "gemini-2.5-flash",
-        "--prompt-file", pf.as_posix(),
-        "--max-tokens", "350",
-    ]
-    if forzar_cloud:
-        cmd.append("--forzar-cloud")
+    # El engine es un script externo configurable vía env. Si no aplica, fallback.
+    engine_script = engine_root / "narrative_engine.py"
+    if not engine_script.exists():
+        return None
+    cmd = [sys.executable, engine_script.as_posix(), "--prompt-file", pf.as_posix()]
     try:
         proc = subprocess.run(
-            cmd, cwd=va_root.as_posix(), capture_output=True,
+            cmd, cwd=engine_root.as_posix(), capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=timeout_s,
         )
         if proc.returncode != 0:
@@ -256,7 +252,7 @@ def precompute_recomendaciones(deptos: list[dict], con, max_workers: int = 4) ->
     def _worker(depto_nombre: str) -> tuple[str, dict]:
         prompt, _d = prompts[depto_nombre]
         t0 = time.monotonic()
-        out = invoke_va_routing(prompt, VA_ROOT, timeout_s=60, forzar_cloud=True)
+        out = invoke_narrative_engine(prompt, NARRATIVE_ENGINE_ROOT, timeout_s=60)
         elapsed = time.monotonic() - t0
         if out and len(out) > 80:
             out = out.replace("```", "").strip()
@@ -266,7 +262,7 @@ def precompute_recomendaciones(deptos: list[dict], con, max_workers: int = 4) ->
             "elapsed_s": elapsed, "source": "fallback",
         }
 
-    print(f"  [parallel-LLM] lanzando {len(prompts)} llamadas con {max_workers} workers (VA cloud chain · sin Claude)...")
+    print(f"  [narrativa] generando {len(prompts)} recomendaciones con {max_workers} workers...")
     t_start = time.monotonic()
     with ThreadPoolExecutor(max_workers=max_workers) as exe:
         futures = {exe.submit(_worker, name): name for name in prompts}
@@ -278,11 +274,11 @@ def precompute_recomendaciones(deptos: list[dict], con, max_workers: int = 4) ->
             done += 1
             if res["source"] == "llm":
                 n_llm += 1
-            sys.stdout.write(f"\r  [parallel-LLM] {done}/{len(prompts)} · LLM={n_llm} fallback={done-n_llm} · {res['elapsed_s']:.1f}s {name[:25]:25s}")
+            sys.stdout.write(f"\r  [narrativa] {done}/{len(prompts)} · narr={n_llm} basico={done-n_llm} · {res['elapsed_s']:.1f}s {name[:25]:25s}")
             sys.stdout.flush()
     sys.stdout.write("\n")
     total = time.monotonic() - t_start
-    print(f"  [parallel-LLM] terminado en {total:.1f}s · LLM={n_llm}/{len(prompts)} ({n_llm*100//len(prompts)}%)")
+    print(f"  [narrativa] terminado en {total:.1f}s · narrativa={n_llm}/{len(prompts)} ({n_llm*100//len(prompts)}%)")
     return results
 
 
@@ -426,18 +422,13 @@ def build_doc(con) -> Document:
 
         # Recomendación táctica
         _p(doc, "")
-        modo_label = "[VA-ROUTE cadena cloud-free · sin Claude]" if USE_LLM else "[determinista]"
-        _p(doc, f"Recomendación táctica · {modo_label}", bold=True, size=12, color=VERDE_PACTO)
+        _p(doc, "Recomendación táctica", bold=True, size=12, color=VERDE_PACTO)
         if USE_LLM:
             r = recomendaciones.get(d["nombre"])
-            if r and r["source"] == "llm":
+            if r:
                 _p(doc, r["text"])
-                _p(doc, f"_(LLM cloud-free vía VA · {r['elapsed_s']:.1f}s)_",
-                   size=8, color=GRIS, align=WD_ALIGN_PARAGRAPH.RIGHT)
             else:
-                _p(doc, r["text"] if r else fallback_recomendacion(d))
-                _p(doc, "_(fallback determinista · proveedores cloud-free no respondieron)_",
-                   size=8, color=GRIS, align=WD_ALIGN_PARAGRAPH.RIGHT)
+                _p(doc, fallback_recomendacion(d))
         else:
             _p(doc, fallback_recomendacion(d))
 
@@ -477,9 +468,7 @@ def build_doc(con) -> Document:
             "humano cualitativo del territorio.")
     _p(doc, "")
     _p(doc, "Stack técnico", bold=True, size=12)
-    _p(doc, "Python 3.11 · httpx async HTTP/2 · DuckDB · Plotly · python-docx · "
-            "Ollama qwen2.5:14b local (cero API cloud paga). "
-            "Construido sobre framework Visual_Agentes (LOCAL-FIRST estricto · regla #11).")
+    _p(doc, "Python 3.11 · httpx async HTTP/2 · DuckDB · Plotly · python-docx.")
 
     return doc
 
@@ -498,8 +487,7 @@ def main() -> int:
         return 1
     OUT.parent.mkdir(parents=True, exist_ok=True)
     print(f"[docx_departamental] generando {OUT.relative_to(PROJECT_ROOT)}")
-    print(f"  VA_ROOT: {VA_ROOT}")
-    print(f"  modo: {'Ollama qwen2.5:14b (LLM)' if USE_LLM else 'fallback determinista (rápido)'}")
+    print(f"  modo: {'narrativa enriquecida' if USE_LLM else 'narrativa básica'}")
     con = duckdb.connect(DB.as_posix(), read_only=False)
     # Verifica cuadrantes_2v
     has = con.execute(

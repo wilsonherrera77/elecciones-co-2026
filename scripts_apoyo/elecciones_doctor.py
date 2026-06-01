@@ -4,7 +4,6 @@ Verifica:
 - Python 3.11+
 - Dependencias instaladas
 - Conectividad a Registraduría con headers Chrome (HTTP 200 en endpoints JSON)
-- Ollama up + modelo qwen2.5:14b disponible
 - Espacio en disco >= 2 GB
 - Acceso de escritura a data/raw, data/processed, logs
 
@@ -101,21 +100,6 @@ def check_nomenclator() -> tuple[bool, str]:
         return False, f"{type(e).__name__}: {e}"
 
 
-def check_ollama() -> tuple[bool, str]:
-    host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    target_model = os.environ.get("OLLAMA_MODEL_NARRATIVA", "qwen2.5:14b")
-    try:
-        with urllib.request.urlopen(f"{host}/api/tags", timeout=4.0) as resp:
-            data = json.loads(resp.read())
-        models = [m.get("name", "") for m in data.get("models", [])]
-        if not models:
-            return False, "Ollama up pero sin modelos · ollama pull qwen2.5:14b"
-        has_target = any(m.startswith(target_model.split(":")[0]) for m in models)
-        return has_target, f"{len(models)} modelos · target {target_model} {'OK' if has_target else 'AUSENTE'}"
-    except (urllib.error.URLError, socket.timeout) as e:
-        return False, f"no responde en {host} · ollama serve"
-
-
 def check_disk() -> tuple[bool, str]:
     total, used, free = shutil.disk_usage(PROJECT_ROOT)
     free_gb = free / (1024**3)
@@ -134,26 +118,14 @@ def check_paths() -> tuple[bool, str]:
     return True, " · ".join(p.relative_to(PROJECT_ROOT).as_posix() for p in paths)
 
 
-def check_va_root() -> tuple[bool, str]:
-    va = Path(os.environ.get("VA_ROOT", r"C:\Users\wilso\Desktop\Escritorio2026\Visual_Agentes"))
-    routing = va / "templates" / "routing_inteligente.py"
-    if not va.exists():
-        return False, f"VA_ROOT inexistente: {va}"
-    if not routing.exists():
-        return False, f"routing_inteligente.py inexistente en {routing}"
-    return True, f"{va} · routing OK"
-
-
 CHECKS = [
     ("Python 3.11+", check_python),
     ("Dependencias core", check_deps),
     ("Playwright (opcional)", check_playwright),
     ("Conectividad Registraduria", check_registraduria),
     ("Nomenclator DIVIPOLA", check_nomenclator),
-    ("Ollama LOCAL-FIRST", check_ollama),
     ("Espacio en disco", check_disk),
     ("Paths de escritura", check_paths),
-    ("VA_ROOT (gateway)", check_va_root),
 ]
 
 
