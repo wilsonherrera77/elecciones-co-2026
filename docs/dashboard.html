@@ -1,139 +1,4 @@
-"""publicar_web.py · genera docs/ para GitHub Pages.
-
-Pasos:
-1. Copia los 4 mapas HTML a docs/mapas/
-2. Copia los CSVs cuadrantes + outputs a docs/descargas/
-3. Copia el Word a docs/descargas/
-4. Genera docs/index.html (landing) con stats live de la DB
-5. Genera docs/reporte.html (versión HTML del reporte 2da vuelta)
-
-Uso: `python -m scripts_apoyo.publicar_web`
-"""
-
-from __future__ import annotations
-
-import shutil
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-import duckdb
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB = PROJECT_ROOT / "data" / "processed" / "votos.duckdb"
-DOCS = PROJECT_ROOT / "docs"
-OUTPUTS = PROJECT_ROOT / "data" / "outputs"
-
-
-def copy_assets() -> dict:
-    """Copia mapas, CSVs y Word a docs/."""
-    (DOCS / "mapas").mkdir(parents=True, exist_ok=True)
-    (DOCS / "descargas").mkdir(parents=True, exist_ok=True)
-
-    # Mapas (4)
-    mapas = ["mapa_afinidad_cepeda.html", "mapa_ganador_local.html",
-             "mapa_brecha_vs_espriella.html", "mapa_oportunidad_2da_vuelta.html"]
-    for m in mapas:
-        src = OUTPUTS / m
-        if src.exists():
-            shutil.copy2(src, DOCS / "mapas" / m)
-
-    # CSVs (cuadrantes + top 200 + defender + perdidos)
-    for csv in OUTPUTS.glob("*.csv"):
-        shutil.copy2(csv, DOCS / "descargas" / csv.name)
-
-    # Reporte 2da vuelta markdown
-    rep = OUTPUTS / "segunda_vuelta_3M.md"
-    if rep.exists():
-        shutil.copy2(rep, DOCS / "descargas" / rep.name)
-
-    # Word (puede no existir aún si está corriendo en background)
-    docx = OUTPUTS / "analisis_departamental_3M_cepeda.docx"
-    docx_exists = docx.exists()
-    if docx_exists:
-        shutil.copy2(docx, DOCS / "descargas" / docx.name)
-
-    # CSV cluster_mapping
-    cl_csv = PROJECT_ROOT / "data" / "processed" / "cluster_mapping.csv"
-    if cl_csv.exists():
-        shutil.copy2(cl_csv, DOCS / "descargas" / "cluster_mapping.csv")
-
-    return {"docx": docx_exists, "n_csvs": len(list((DOCS / "descargas").glob("*.csv")))}
-
-
-def get_stats() -> dict:
-    """Lee stats de la DB para el dashboard."""
-    con = duckdb.connect(DB.as_posix(), read_only=True)
-    nac = con.execute("""
-        SELECT
-            (SELECT SUM(censo_electoral) FROM (SELECT DISTINCT scope_idx, censo_electoral FROM votos_municipio_snapshot)) censo,
-            (SELECT SUM(votos_validos) FROM (SELECT DISTINCT scope_idx, votos_validos FROM votos_municipio_snapshot)) validos,
-            (SELECT SUM(votos) FROM votos_municipio_snapshot WHERE codpar='7') cepeda,
-            (SELECT SUM(votos) FROM votos_municipio_snapshot WHERE codpar='10') espriella,
-            (SELECT COUNT(*) FROM divipola_2026 WHERE level=3) mpios_total
-    """).fetchone()
-    cuads = dict(con.execute("""
-        SELECT
-            CASE WHEN cuadrante LIKE 'Q1%' THEN 'Q1' ELSE cuadrante END AS q,
-            COUNT(*) AS n
-        FROM cuadrantes_2v GROUP BY 1
-    """).fetchall())
-    top_op = con.execute("""
-        SELECT nombre_municipio, departamento_nombre, votos_cepeda, pct_cepeda,
-               no_votantes, brecha_vs_espriella
-        FROM cuadrantes_2v
-        WHERE cuadrante IN ('Q2_MOVILIZAR', 'Q3_CONVERTIR')
-        ORDER BY no_votantes DESC LIMIT 20
-    """).fetchall()
-    pct_escrutinio = con.execute("""
-        SELECT ROUND(SUM(mesas_informadas)::DOUBLE / NULLIF(SUM(mesas_total),0)*100, 2)
-        FROM (SELECT DISTINCT scope_idx, mesas_informadas, mesas_total FROM votos_municipio_snapshot)
-    """).fetchone()[0]
-    con.close()
-    return {
-        "censo": nac[0] or 0,
-        "validos": nac[1] or 0,
-        "cepeda": nac[2] or 0,
-        "espriella": nac[3] or 0,
-        "mpios_total": nac[4] or 0,
-        "brecha": (nac[3] or 0) - (nac[2] or 0),
-        "pct_cep": (nac[2] or 0) / (nac[1] or 1) * 100,
-        "pct_esp": (nac[3] or 0) / (nac[1] or 1) * 100,
-        "q1": cuads.get("Q1", 0),
-        "q2": cuads.get("Q2_MOVILIZAR", 0),
-        "q3": cuads.get("Q3_CONVERTIR", 0),
-        "q4": cuads.get("Q4_RESISTIR", 0),
-        "pct_escrutinio": pct_escrutinio,
-        "top_op": top_op,
-    }
-
-
-def fmt(n: int) -> str:
-    return f"{n:,}".replace(",", ".")
-
-
-def render_index(stats: dict, docx_exists: bool) -> str:
-    """Genera el HTML del index."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    rows_top = "".join(
-        f"<tr><td>{i}</td><td>{r[0]}</td><td>{r[1]}</td>"
-        f"<td class='num'>{fmt(r[2])}</td><td class='num'>{r[3]:.1f}%</td>"
-        f"<td class='num'>{fmt(r[4])}</td><td class='num'>{r[5]:+,}</td></tr>"
-        for i, r in enumerate(stats["top_op"], 1)
-    )
-
-    docx_link = (
-        '<a class="download-card" href="descargas/analisis_departamental_3M_cepeda.docx" download>'
-        '<span class="icon">📄</span><div><div class="title">Documento Word departamental</div>'
-        '<div class="desc">Análisis 34 departamentos · narrativa LLM local · ~80 páginas</div></div></a>'
-        if docx_exists else
-        '<div class="download-card" style="opacity:0.5"><span class="icon">⏳</span>'
-        '<div><div class="title">Documento Word departamental</div>'
-        '<div class="desc">En generación · regenerar y volver a publicar</div></div></div>'
-    )
-
-    return f"""<!doctype html>
+<!doctype html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -155,11 +20,11 @@ def render_index(stats: dict, docx_exists: bool) -> str:
     <div style="text-align:left; margin-bottom:24px"><a href="./" style="color:rgba(255,255,255,0.9); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase">← Volver a la presentación</a></div>
     <div class="meta">Iván Cepeda · Pacto Histórico · 2da vuelta presidencial 2026</div>
     <h1>¿Dónde están los 3 millones de votos<br>para ganar la segunda vuelta?</h1>
-    <p class="subtitle">Análisis municipio a municipio (1.189 municipios · 41.4M electores) basado en los datos oficiales de la Registraduría Nacional. Escrutinio al {stats['pct_escrutinio']:.2f}% · captura completa.</p>
+    <p class="subtitle">Análisis municipio a municipio (1.189 municipios · 41.4M electores) basado en los datos oficiales de la Registraduría Nacional. Escrutinio al 99.92% · captura completa.</p>
     <div class="stats">
-      <div class="stat-card"><div class="label">Cepeda · Pacto Histórico</div><div class="value">{fmt(stats['cepeda'])}</div><div class="delta">{stats['pct_cep']:.2f}% de votos válidos</div></div>
-      <div class="stat-card"><div class="label">Espriella · Defensores</div><div class="value">{fmt(stats['espriella'])}</div><div class="delta">{stats['pct_esp']:.2f}% · pasa primero a runoff</div></div>
-      <div class="stat-card"><div class="label">Brecha de 1ra vuelta</div><div class="value">{fmt(stats['brecha'])}</div><div class="delta">Espriella +{stats['pct_esp']-stats['pct_cep']:.2f} pp</div></div>
+      <div class="stat-card"><div class="label">Cepeda · Pacto Histórico</div><div class="value">9.683.743</div><div class="delta">40.91% de votos válidos</div></div>
+      <div class="stat-card"><div class="label">Espriella · Defensores</div><div class="value">10.351.548</div><div class="delta">43.74% · pasa primero a runoff</div></div>
+      <div class="stat-card"><div class="label">Brecha de 1ra vuelta</div><div class="value">667.805</div><div class="delta">Espriella +2.82 pp</div></div>
       <div class="stat-card"><div class="label">Meta 2da vuelta</div><div class="value">+3.000.000</div><div class="delta">para superar 50%+1 con turnout +5pp</div></div>
     </div>
   </div>
@@ -191,22 +56,22 @@ def render_index(stats: dict, docx_exists: bool) -> str:
     <div class="cuadrantes">
       <div class="cuad-card q1">
         <h3>Q1 · DEFENDER</h3>
-        <div class="mpios">{stats['q1']}</div>
+        <div class="mpios">431</div>
         <p>Municipios donde Cepeda ganó. Acción: proteger turnout con testigos electorales · al menos 1 por puesto.</p>
       </div>
       <div class="cuad-card q2">
         <h3>Q2 · MOVILIZAR</h3>
-        <div class="mpios">{stats['q2']}</div>
+        <div class="mpios">81</div>
         <p>Margen ≤10 pp en cualquier dirección. Aquí se gana o se pierde · empujar no-votantes Pacto + capturar voto blanco.</p>
       </div>
       <div class="cuad-card q3">
         <h3>Q3 · CONVERTIR</h3>
-        <div class="mpios">{stats['q3']}</div>
+        <div class="mpios">240</div>
         <p>Cepeda detrás por 10-30 pp. Persuasión de centro · alianza con Dignidad & Compromiso · capturar voto blanco urbano.</p>
       </div>
       <div class="cuad-card q4">
         <h3>Q4 · RESISTIR</h3>
-        <div class="mpios">{stats['q4']}</div>
+        <div class="mpios">437</div>
         <p>Cepeda detrás >30 pp. Territorio hostil · piso digno >20% · no derrochar recursos en mpios irrecuperables.</p>
       </div>
     </div>
@@ -220,7 +85,7 @@ def render_index(stats: dict, docx_exists: bool) -> str:
     <div style="overflow-x:auto;">
     <table>
       <thead><tr><th>#</th><th>Municipio</th><th>Departamento</th><th>Votos Cepeda</th><th>% Cep</th><th>No-votantes</th><th>Brecha</th></tr></thead>
-      <tbody>{rows_top}</tbody>
+      <tbody><tr><td>1</td><td>PEREIRA</td><td>RISARALDA</td><td class='num'>96.694</td><td class='num'>35.3%</td><td class='num'>189.463</td><td class='num'>+28,140</td></tr><tr><td>2</td><td>IBAGUE</td><td>TOLIMA</td><td class='num'>109.574</td><td class='num'>35.9%</td><td class='num'>169.798</td><td class='num'>+31,786</td></tr><tr><td>3</td><td>BELLO</td><td>ANTIOQUIA</td><td class='num'>63.055</td><td class='num'>27.9%</td><td class='num'>153.969</td><td class='num'>+53,635</td></tr><tr><td>4</td><td>VILLAVICENCIO</td><td>META</td><td class='num'>78.547</td><td class='num'>30.4%</td><td class='num'>147.031</td><td class='num'>+58,183</td></tr><tr><td>5</td><td>MANIZALES</td><td>CALDAS</td><td class='num'>73.993</td><td class='num'>32.1%</td><td class='num'>118.145</td><td class='num'>+24,547</td></tr><tr><td>6</td><td>NEIVA</td><td>HUILA</td><td class='num'>71.549</td><td class='num'>38.9%</td><td class='num'>113.396</td><td class='num'>+14,449</td></tr><tr><td>7</td><td>ARMENIA</td><td>QUINDIO</td><td class='num'>53.484</td><td class='num'>31.5%</td><td class='num'>111.621</td><td class='num'>+30,880</td></tr><tr><td>8</td><td>DOSQUEBRADAS</td><td>RISARALDA</td><td class='num'>40.698</td><td class='num'>37.7%</td><td class='num'>73.497</td><td class='num'>+6,183</td></tr><tr><td>9</td><td>FLORENCIA</td><td>CAQUETA</td><td class='num'>26.756</td><td class='num'>34.2%</td><td class='num'>59.238</td><td class='num'>+14,352</td></tr><tr><td>10</td><td>CARTAGO</td><td>VALLE</td><td class='num'>24.806</td><td class='num'>37.7%</td><td class='num'>56.475</td><td class='num'>+5,459</td></tr><tr><td>11</td><td>PITALITO</td><td>HUILA</td><td class='num'>21.913</td><td class='num'>33.9%</td><td class='num'>49.501</td><td class='num'>+12,589</td></tr><tr><td>12</td><td>GIRON</td><td>SANTANDER</td><td class='num'>25.499</td><td class='num'>29.7%</td><td class='num'>47.780</td><td class='num'>+23,183</td></tr><tr><td>13</td><td>FUSAGASUGA</td><td>CUNDINAMARCA</td><td class='num'>27.302</td><td class='num'>33.0%</td><td class='num'>41.478</td><td class='num'>+14,348</td></tr><tr><td>14</td><td>EL CARMEN DE BOLIVAR</td><td>BOLIVAR</td><td class='num'>10.555</td><td class='num'>38.3%</td><td class='num'>34.412</td><td class='num'>+4,086</td></tr><tr><td>15</td><td>ECUADOR</td><td>CONSULADOS</td><td class='num'>2.505</td><td class='num'>27.1%</td><td class='num'>34.129</td><td class='num'>+2,530</td></tr><tr><td>16</td><td>SAN ANDRES</td><td>SAN ANDRES</td><td class='num'>7.346</td><td class='num'>43.8%</td><td class='num'>32.156</td><td class='num'>+58</td></tr><tr><td>17</td><td>CANADA</td><td>CONSULADOS</td><td class='num'>11.567</td><td class='num'>28.1%</td><td class='num'>32.117</td><td class='num'>+9,249</td></tr><tr><td>18</td><td>COPACABANA</td><td>ANTIOQUIA</td><td class='num'>13.240</td><td class='num'>28.9%</td><td class='num'>32.096</td><td class='num'>+9,889</td></tr><tr><td>19</td><td>GIRARDOT</td><td>CUNDINAMARCA</td><td class='num'>21.283</td><td class='num'>38.5%</td><td class='num'>31.906</td><td class='num'>+5,193</td></tr><tr><td>20</td><td>AGUACHICA</td><td>CESAR</td><td class='num'>14.388</td><td class='num'>31.4%</td><td class='num'>31.886</td><td class='num'>+12,939</td></tr></tbody>
     </table>
     </div>
   </div>
@@ -231,7 +96,7 @@ def render_index(stats: dict, docx_exists: bool) -> str:
     <h2>Descargas <span class="accent">data abierta</span></h2>
     <p class="section-subtitle">Todos los outputs analíticos en formato listo para usar. Reproducible con `git clone` + corrida de pipeline.</p>
     <div class="downloads">
-      {docx_link}
+      <a class="download-card" href="descargas/analisis_departamental_3M_cepeda.docx" download><span class="icon">📄</span><div><div class="title">Documento Word departamental</div><div class="desc">Análisis 34 departamentos · narrativa LLM local · ~80 páginas</div></div></a>
       <a class="download-card" href="descargas/segunda_vuelta_3M.md" download><span class="icon">📋</span><div><div class="title">Reporte ejecutivo</div><div class="desc">Análisis 2da vuelta + cuadrantes + simulación 3M</div></div></a>
       <a class="download-card" href="descargas/como_leer_los_mapas.md" download><span class="icon">📖</span><div><div class="title">Cómo leer los mapas</div><div class="desc">Guía de interpretación + fórmulas del score 2da vuelta</div></div></a>
       <a class="download-card" href="presentacion.html" style="background:#0a6e3a; color:white; border-color:#0a6e3a"><span class="icon">▶️</span><div><div class="title" style="color:white">Presentación de campaña</div><div class="desc" style="color:rgba(255,255,255,0.85)">12 slides · navegación por teclado · mapas embebidos</div></div></a>
@@ -247,7 +112,7 @@ def render_index(stats: dict, docx_exists: bool) -> str:
 
 <footer>
   <div class="container">
-    <p>Fuente: <a href="https://resultados.registraduria.gov.co/">Registraduría Nacional del Estado Civil</a> · escrutinio al {stats['pct_escrutinio']:.2f}% · captura {now} · MIT License</p>
+    <p>Fuente: <a href="https://resultados.registraduria.gov.co/">Registraduría Nacional del Estado Civil</a> · escrutinio al 99.92% · captura 2026-06-01 03:07 UTC · MIT License</p>
     <p style="margin-top:8px">Wilson Herrera Quiroga · 2026</p>
   </div>
 </footer>
@@ -256,35 +121,15 @@ def render_index(stats: dict, docx_exists: bool) -> str:
   // Tabs simples para los 4 mapas
   const tabs = document.querySelectorAll('.map-tab');
   const frames = document.querySelectorAll('.map-frame');
-  tabs.forEach(t => t.addEventListener('click', () => {{
+  tabs.forEach(t => t.addEventListener('click', () => {
     tabs.forEach(x => x.classList.remove('active'));
     t.classList.add('active');
     const target = t.getAttribute('data-target');
-    frames.forEach(f => {{
+    frames.forEach(f => {
       f.classList.toggle('hidden', f.id !== target);
-    }});
-  }}));
+    });
+  }));
 </script>
 
 </body>
 </html>
-"""
-
-
-def main() -> int:
-    if not DB.exists():
-        print("ERROR: corre el pipeline antes")
-        return 1
-    DOCS.mkdir(exist_ok=True)
-    info = copy_assets()
-    print(f"[publicar] assets copiados · csvs={info['n_csvs']} · docx={info['docx']}")
-    stats = get_stats()
-    html = render_index(stats, info["docx"])
-    (DOCS / "dashboard.html").write_text(html, encoding="utf-8")
-    print(f"[publicar] docs/dashboard.html generado · {len(html)/1024:.1f} KB")
-    print(f"[publicar] (la landing principal '/' es la presentación · docs/index.html)")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
